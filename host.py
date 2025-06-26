@@ -285,7 +285,16 @@ def _update_oled() -> None:
         return w, h
 
     toggle = False  # 用于高温反色闪烁
+    last_second = -1  # 记录上次显示的秒数，用于同步刷新
+    
     while OLED_RUNNING:  # 检查运行标志
+        # 等待到下一秒的开始，实现与时间同步
+        current_second = time.localtime().tm_sec
+        if current_second == last_second:
+            time.sleep(0.1)  # 短暂等待，避免CPU占用过高
+            continue
+        last_second = current_second
+        
         with OLED_LOCK:
             img = Image.new("1", OLED.size)
             draw = ImageDraw.Draw(img)
@@ -332,25 +341,34 @@ def _update_oled() -> None:
                 draw.text((margin, y), f"Pan:{pan} Tilt:{tilt}", font=font, fill=255)
                 y += line_h
 
-            # 温度
+            # 温度和时间
             temps = _current_temperature()
+            # 获取当前时间（精确到秒）
+            current_time = time.strftime("%H:%M:%S")
+            
+            # 时间左对齐显示（不闪烁）
+            draw.text((margin, y), current_time, font=font, fill=255)
+            
             if temps:
                 tmax = max(temps.values())
                 temp_str = f"T:{tmax:.1f}C"
-                # 高温反色警告闪烁
+                
+                # 温度右对齐显示
+                tw, th = get_text_size(draw, temp_str, font)
+                temp_x = width - tw - margin
+                
+                # 高温反色警告闪烁（只闪烁温度部分）
                 if tmax >= 80:
-                    tw, th = get_text_size(draw, temp_str, font)
                     if toggle:
-                        draw.rectangle([width-tw-margin-1, y+1, width-margin, y+th+2], fill=255)
-                        draw.text((width-tw-margin-1, y), temp_str, font=font, fill=0)
+                        draw.rectangle([temp_x-1, y+1, width-margin, y+th+2], fill=255)
+                        draw.text((temp_x, y), temp_str, font=font, fill=0)
                     else:
-                        draw.text((width-tw-margin-1, y), temp_str, font=font, fill=255)
+                        draw.text((temp_x, y), temp_str, font=font, fill=255)
                 else:
-                    draw.text((width-45, y), temp_str, font=font, fill=255)
+                    draw.text((temp_x, y), temp_str, font=font, fill=255)
 
             OLED.display(img)
         toggle = not toggle  # 每次循环取反，实现闪烁
-        time.sleep(1)
 
 
 def _init_oled_thread() -> None:
