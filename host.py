@@ -32,7 +32,9 @@ import json
 import os
 import re
 import shlex
+import shutil
 import signal
+import socket
 import subprocess
 import threading
 import time
@@ -81,6 +83,8 @@ except Exception as e:  # noqa: BLE001
     OLED = None
 
 OLED_LOCK = threading.Lock()
+# 舵机访问锁，防止并发访问导致数据串扰
+SERVO_LOCK = threading.Lock()
 
 # 配置持久化文件
 CONFIG_FILE = "device_config.json"
@@ -178,7 +182,6 @@ def _make_gst_pipeline(protocol: str, view: str, url: str) -> str:
 
     elif protocol == "hls":
         # Always output to /tmp/hls/ regardless of url
-        import shutil
         hls_dir = Path("/tmp/hls")
         hls_dir.mkdir(parents=True, exist_ok=True)
         # 递归清空hls目录下所有内容
@@ -355,7 +358,6 @@ def _init_oled_thread() -> None:
 
 def get_ip_address() -> str:
     """获取本机局域网IP地址（优先eth0/wlan0等）"""
-    import socket
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(0)
@@ -457,46 +459,67 @@ def motion(axis: str):
     direction = map_cfg.get("direction", -1)
     scale = map_cfg.get("scale", 1)
 
-    if request.method == "GET":
-        try:
-            # 返回映射前的角度（反推）和实际物理角度
-            physical_angle = servo.get_physical_angle()
-            mapped_angle = (physical_angle - center) / (direction * scale)
-            return jsonify({"angle": mapped_angle, "physical_angle": physical_angle})
-        except Exception as e:
-            print(f"Warning: Failed to read servo {axis} position: {e}")
-            # 返回默认值或上次已知值
-            return jsonify({"angle": 0, "physical_angle": center, "error": "communication_error"})
+    # 使用线程锁保护舵机访问，防止并发访问导致数据串扰
+    with SERVO_LOCK:
+        if request.method == "GET":
+            try:
+                # 返回映射前的角度（反推）和实际物理角度
+                physical_angle = servo.get_physical_angle()
+                mapped_angle = (physical_angle - center) / (direction * scale)
+                return jsonify({
+                    "angle": mapped_angle, 
+                    "physical_angle": physical_angle,
+                    "axis": axis  # 添加轴标识，便于前端验证
+                })
+            except Exception as e:
+                print(f"Warning: Failed to read servo {axis} position: {e}")
+                # 返回默认值或上次已知值
+                return jsonify({
+                    "angle": 0, 
+                    "physical_angle": center, 
+                    "axis": axis,
+                    "error": "communication_error"
+                })
 
-    data = request.get_json(force=True)
-    angle = int(data.get("angle", 0))
-    option = data.get("option", "")
-    if option == "raw":
-        # 直接用原始角度
-        servo_angle = angle
-    else:
-        # 进行角度映射
-        servo_angle = int(center + direction * angle * scale)
-    # 使用持久化限位
-    min_limit, max_limit = SERVO_LIMITS[axis]
-    limited_angle = max(min_limit, min(max_limit, servo_angle))
-    
-    try:
-        # limit speed to 15 deg /s
-        current_angle = servo.get_physical_angle()
-        move_time = int(abs(current_angle - limited_angle) * 1000 / 15.0)
-    except Exception as e:
-        print(f"Warning: Failed to read current servo {axis} position: {e}")
-        # 使用默认移动时间
-        move_time = 1000
-    
-    try:
-        servo.move(limited_angle, time=move_time)
-        status = "ok" if limited_angle == servo_angle else "limited"
-        return jsonify({"status": status, "angle": angle, "physical_angle": limited_angle})
-    except Exception as e:
-        print(f"Error: Failed to move servo {axis}: {e}")
-        return jsonify({"status": "error", "error": "servo_communication_failed", "message": str(e)}), 500
+        data = request.get_json(force=True)
+        angle = int(data.get("angle", 0))
+        option = data.get("option", "")
+        if option == "raw":
+            # 直接用原始角度
+            servo_angle = angle
+        else:
+            # 进行角度映射
+            servo_angle = int(center + direction * angle * scale)
+        # 使用持久化限位
+        min_limit, max_limit = SERVO_LIMITS[axis]
+        limited_angle = max(min_limit, min(max_limit, servo_angle))
+        
+        try:
+            # limit speed to 15 deg /s
+            current_angle = servo.get_physical_angle()
+            move_time = int(abs(current_angle - limited_angle) * 1000 / 15.0)
+        except Exception as e:
+            print(f"Warning: Failed to read current servo {axis} position: {e}")
+            # 使用默认移动时间
+            move_time = 1000
+        
+        try:
+            servo.move(limited_angle, time=move_time)
+            status = "ok" if limited_angle == servo_angle else "limited"
+            return jsonify({
+                "status": status, 
+                "angle": angle, 
+                "physical_angle": limited_angle,
+                "axis": axis  # 添加轴标识
+            })
+        except Exception as e:
+            print(f"Error: Failed to move servo {axis}: {e}")
+            return jsonify({
+                "status": "error", 
+                "error": "servo_communication_failed", 
+                "message": str(e),
+                "axis": axis
+            }), 500
 
 
 @app.route("/motion/<axis>/limit", methods=["GET", "POST"])

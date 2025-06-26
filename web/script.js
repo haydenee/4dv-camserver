@@ -475,6 +475,13 @@ class CameraController {
         try {
             const response = await this.apiCall(`/motion/${axis}`, 'POST', { angle });
             
+            // 验证返回的轴信息，防止数据串扰
+            if (response.axis && response.axis !== axis) {
+                console.error(`Data corruption: requested ${axis} but got response for ${response.axis}`);
+                this.showToast('error', '数据异常', `${axis}舵机控制数据异常，请重试`);
+                return;
+            }
+            
             if (response.status === 'error') {
                 if (response.error === 'servo_communication_failed') {
                     this.showToast('warning', '舵机通信', `${axis}舵机通信失败，请检查连接`);
@@ -523,12 +530,15 @@ class CameraController {
         const panSlider = document.getElementById('pan-slider');
         const tiltSlider = document.getElementById('tilt-slider');
         
+        // 串行处理，避免并发调用导致数据串扰
         if (panDelta !== 0) {
             const newPan = Math.max(-45, Math.min(45, parseInt(panSlider.value) + panDelta));
             if (newPan !== parseInt(panSlider.value)) {
                 panSlider.value = newPan;
                 this.updateSliderValue('pan', newPan);
-                this.setServoAngle('pan', newPan);
+                await this.setServoAngle('pan', newPan);
+                // 小延迟，避免连续调用串口冲突
+                await new Promise(resolve => setTimeout(resolve, 50));
             }
         }
         
@@ -537,14 +547,18 @@ class CameraController {
             if (newTilt !== parseInt(tiltSlider.value)) {
                 tiltSlider.value = newTilt;
                 this.updateSliderValue('tilt', newTilt);
-                this.setServoAngle('tilt', newTilt);
+                await this.setServoAngle('tilt', newTilt);
             }
         }
     }
 
     async centerServos() {
+        // 串行调用，避免并发控制导致数据串扰
         await this.setServoAngle('pan', 0);
+        await new Promise(resolve => setTimeout(resolve, 100)); // 小延迟
         await this.setServoAngle('tilt', 0);
+        
+        // 更新UI
         document.getElementById('pan-slider').value = 0;
         document.getElementById('tilt-slider').value = 0;
         this.updateSliderValue('pan', 0);
@@ -553,16 +567,16 @@ class CameraController {
 
     async updateServoPositions() {
         try {
-            const [panResponse, tiltResponse] = await Promise.all([
-                this.apiCall('/motion/pan').catch(e => ({ error: 'api_error' })),
-                this.apiCall('/motion/tilt').catch(e => ({ error: 'api_error' }))
-            ]);
+            // 串行获取舵机位置，避免并发访问导致数据串扰
+            const panResponse = await this.apiCall('/motion/pan').catch(e => ({ error: 'api_error', axis: 'pan' }));
+            await new Promise(resolve => setTimeout(resolve, 50)); // 小延迟避免串口冲突
+            const tiltResponse = await this.apiCall('/motion/tilt').catch(e => ({ error: 'api_error', axis: 'tilt' }));
             
             const panSlider = document.getElementById('pan-slider');
             const tiltSlider = document.getElementById('tilt-slider');
             
-            // 处理Pan响应 - 只有在成功获取到有效角度时才更新
-            if (panResponse && !panResponse.error && typeof panResponse.angle === 'number') {
+            // 处理Pan响应 - 验证返回的轴标识
+            if (panResponse && panResponse.axis === 'pan' && !panResponse.error && typeof panResponse.angle === 'number') {
                 const pan = panResponse.angle;
                 if (panSlider) {
                     panSlider.value = pan;
@@ -570,10 +584,13 @@ class CameraController {
                 }
             } else if (panResponse && panResponse.error === 'communication_error') {
                 console.warn('Pan servo communication error, keeping current value');
+            } else if (panResponse && panResponse.axis !== 'pan') {
+                console.error('Data corruption detected: expected pan axis but got', panResponse.axis);
+                this.showToast('warning', '数据异常', 'Pan轴数据可能异常，请刷新页面');
             }
             
-            // 处理Tilt响应 - 只有在成功获取到有效角度时才更新
-            if (tiltResponse && !tiltResponse.error && typeof tiltResponse.angle === 'number') {
+            // 处理Tilt响应 - 验证返回的轴标识
+            if (tiltResponse && tiltResponse.axis === 'tilt' && !tiltResponse.error && typeof tiltResponse.angle === 'number') {
                 const tilt = tiltResponse.angle;
                 if (tiltSlider) {
                     tiltSlider.value = tilt;
@@ -581,6 +598,9 @@ class CameraController {
                 }
             } else if (tiltResponse && tiltResponse.error === 'communication_error') {
                 console.warn('Tilt servo communication error, keeping current value');
+            } else if (tiltResponse && tiltResponse.axis !== 'tilt') {
+                console.error('Data corruption detected: expected tilt axis but got', tiltResponse.axis);
+                this.showToast('warning', '数据异常', 'Tilt轴数据可能异常，请刷新页面');
             }
         } catch (error) {
             console.error('Update servo positions failed:', error);
