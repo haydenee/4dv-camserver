@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>4DV Camera Control</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header compact-header">
+            <div class="header-content compact-header-content">
+                <h1 id="device-info"><i class="fas fa-video"></i> <span id="hostname-display">获取中...</span></h1>
+                <div class="status-indicators">
+                    <div class="status-item" id="connection-status">
+                        <i class="fas fa-circle"></i>
+                        <span>连接中...</span>
+                    </div>
+                    <div class="status-item" id="temperature-status">
+                        <i class="fas fa-thermometer-half"></i>
+                        <span id="temperature-display">--°C</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Video Stream Section -->
+            <section class="video-section">
+                <div class="video-container">
+                    <video id="video-player" controls muted playsinline>
+                        <source id="video-source" src="" type="application/x-mpegURL">
+                        您的浏览器不支持视频播放
+                    </video>
+                    <div class="video-overlay" id="video-overlay">
+                        <div class="overlay-content">
+                            <i class="fas fa-play-circle"></i>
+                            <p>点击开始直播</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Stream Controls -->
+                <div class="stream-controls">
+                    <div class="control-group">
+                        <label>协议</label>
+                        <select id="protocol-select">
+                            <option value="hls">HLS</option>
+                            <option value="rtsp">RTSP</option>
+                            <option value="udp">UDP</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label>视图模式</label>
+                        <select id="view-select">
+                            <option value="yolo">YOLO</option>
+                            <option value="pure">纯画面</option>
+                        </select>
+                    </div>
+                    <div class="control-group" id="url-group">
+                        <label>自定义URL</label>
+                        <input type="text" id="url-input" placeholder="udp://192.168.1.100:5000">
+                    </div>
+                    <button id="stream-toggle" class="btn btn-primary">
+                        <i class="fas fa-play"></i>
+                        开始直播
+                    </button>
+                </div>
+            </section>
+
+            <!-- Control Panels -->
+            <div class="control-panels">
+                <!-- Motion Control -->
+                <section class="control-panel">
+                    <h3><i class="fas fa-arrows-alt"></i> 云台控制</h3>
+                    
+                    <!-- Pan Control -->
+                    <div class="motion-control">
+                        <label>水平角度 (Pan)</label>
+                        <div class="slider-container">
+                            <input type="range" id="pan-slider" min="-45" max="45" value="0" step="1">
+                            <div class="slider-value">
+                                <span id="pan-value">0</span>°
+                            </div>
+                        </div>
+                        <div class="angle-buttons">
+                            <button class="btn btn-secondary" data-axis="pan" data-angle="-10">
+                                <i class="fas fa-angle-double-left"></i>
+                            </button>
+                            <button class="btn btn-secondary" data-axis="pan" data-angle="-4">
+                                <i class="fas fa-angle-left"></i>
+                            </button>
+                            <button class="btn btn-secondary" data-axis="pan" data-angle="0">
+                                <i class="fas fa-dot-circle"></i>
+                            </button>
+                            <button class="btn btn-secondary" data-axis="pan" data-angle="4">
+                                <i class="fas fa-angle-right"></i>
+                            </button>
+                            <button class="btn btn-secondary" data-axis="pan" data-angle="10">
+                                <i class="fas fa-angle-double-right"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Tilt Control -->
+                    <div class="motion-control">
+                        <label>垂直角度 (Tilt)</label>
+                        <div class="slider-container">
+                            <input type="range" id="tilt-slider" min="-45" max="45" value="0" step="1">
+                            <div class="slider-value">
+                                <span id="tilt-value">0</span>°
+                            </div>
+                        </div>
+                        <div class="angle-buttons">
+                            <button class="btn btn-secondary" data-axis="tilt" data-angle="-10">
+                                <i class="fas fa-angle-double-down"></i>
+                            </button>
+                            <button class="btn btn-secondary" data-axis="tilt" data-angle="-4">
+                                <i class="fas fa-angle-down"></i>
+                            </button>
+                            <button class="btn btn-secondary" data-axis="tilt" data-angle="0">
+                                <i class="fas fa-dot-circle"></i>
+                            </button>
+                            <button class="btn btn-secondary" data-axis="tilt" data-angle="4">
+                                <i class="fas fa-angle-up"></i>
+                            </button>
+                            <button class="btn btn-secondary" data-axis="tilt" data-angle="10">
+                                <i class="fas fa-angle-double-up"></i>
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- System Control -->
+                <section class="control-panel">
+                    <h3><i class="fas fa-cog"></i> 系统控制</h3>
+                    <!-- Power Control -->
+                    <div class="power-control">
+                        <button id="power-button" class="btn btn-power btn-power-off">
+                            <i class="fas fa-power-off"></i>
+                            <span class="button-label">相机电源</span>
+                            <span class="button-status" id="power-status">关闭</span>
+                        </button>
+                        <button id="reboot-button" class="btn btn-danger">
+                            <i class="fas fa-rotate"></i>
+                            <span class="button-label">系统</span>
+                            <span class="button-status" id="reboot-status">重启</span>
+                        </button>
+                    </div>
+                    <!-- System Info -->
+                    <div class="system-info">
+                        <div class="info-item">
+                            <label>主机名</label>
+                            <div class="hostname-control">
+                                <input type="text" id="hostname-input" readonly>
+                                <button id="hostname-edit" class="btn btn-secondary btn-sm">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Servo Limits -->
+                <section class="control-panel">
+                    <h3><i class="fas fa-sliders-h"></i> 舵机限位</h3>
+                    <div class="limit-control">
+                        <label>Pan 限制角度</label>
+                        <div class="limit-inputs">
+                            <input type="number" id="pan-min" min="0" max="240" placeholder="最小">
+                            <span>~</span>
+                            <input type="number" id="pan-max" min="0" max="240" placeholder="最大">
+                            <button class="btn btn-secondary btn-sm" id="pan-limit-set">设置</button>
+                        </div>
+                    </div>
+                    <div class="limit-control">
+                        <label>Tilt 限制角度</label>
+                        <div class="limit-inputs">
+                            <input type="number" id="tilt-min" min="0" max="240" placeholder="最小">
+                            <span>~</span>
+                            <input type="number" id="tilt-max" min="0" max="240" placeholder="最大">
+                            <button class="btn btn-secondary btn-sm" id="tilt-limit-set">设置</button>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+
+        <!-- Toast Notifications -->
+        <div id="toast-container"></div>
+    </div>
+
+    <!-- Keyboard Shortcuts Help -->
+    <div class="keyboard-help" id="keyboard-help">
+        <h4>键盘快捷键</h4>
+        <div class="shortcuts">
+            <div><kbd>W/S</kbd> 垂直控制</div>
+            <div><kbd>A/D</kbd> 水平控制</div>
+            <div><kbd>Space</kbd> 回中心</div>
+            <div><kbd>P</kbd> 电源开关</div>
+            <div><kbd>Enter</kbd> 开始/停止直播</div>
+            <div><kbd>H</kbd> 显示/隐藏帮助</div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="script.js"></script>
+</body>
+</html>

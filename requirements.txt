@@ -1,0 +1,6 @@
+flask
+python-periphery
+pylx16a
+luma.oled
+psutil
+Pillow

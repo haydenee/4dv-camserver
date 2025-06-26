@@ -1,0 +1,1 @@
+{"servo_limits": {"pan": [30, 210], "tilt": [84, 165]}, "pwr_init": true, "pan_init": 120, "tilt_init": 120, "servo_map": {"pan": {"center": 120, "direction": -1, "scale": 1}, "tilt": {"center": 120, "direction": -1, "scale": 1}}}

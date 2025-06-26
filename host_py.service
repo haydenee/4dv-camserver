@@ -1,0 +1,14 @@
+[Unit]
+Description=Camera Control Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/4dv-env
+ExecStart=/root/4dv-env/bin/python /root/4dv-env/host.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
