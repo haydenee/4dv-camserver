@@ -41,6 +41,7 @@ import time
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
+import ntplib
 import psutil  # lightweight; used for extra temperature sensors
 from flask import Flask, jsonify, request, send_from_directory, redirect
 from periphery import GPIO
@@ -87,6 +88,8 @@ OLED_LOCK = threading.Lock()
 SERVO_LOCK = threading.Lock()
 # OLED刷新控制标志
 OLED_RUNNING = True
+# NTP同步控制标志
+NTP_RUNNING = True
 
 # 配置持久化文件
 CONFIG_FILE = "device_config.json"
@@ -99,7 +102,10 @@ DEFAULT_CONFIG = {
     "servo_map": {
         "pan": {"center": 120, "direction": -1, "scale": 1},
         "tilt": {"center": 120, "direction": -1, "scale": 1}
-    }
+    },
+    # NTP服务器配置
+    "ntp_servers": ["pool.ntp.org", "time.nist.gov", "cn.pool.ntp.org"],
+    "ntp_sync_interval": 300  # 5分钟 = 300秒
 }
 
 # Flask server port (configurable)
@@ -721,13 +727,14 @@ def web_files(filename):
 
 def _clear_oled_display() -> None:
     """Clear the OLED display and stop refresh thread"""
-    global OLED_RUNNING
+    global OLED_RUNNING, NTP_RUNNING
     if OLED is None:
         return
     try:
-        # 停止OLED刷新线程
+        # 停止OLED刷新线程和NTP同步线程
         OLED_RUNNING = False
-        time.sleep(0.1)  # 等待刷新线程退出
+        NTP_RUNNING = False
+        time.sleep(0.1)  # 等待线程退出
         
         # 清空显示屏
         with OLED_LOCK:
@@ -753,14 +760,110 @@ def system_reboot():
 
 
 # ---------------------------------------------------------------------------
+# NTP synchronization
+# ---------------------------------------------------------------------------
+
+
+def _sync_time_with_ntp() -> bool:
+    """使用NTP同步系统时间"""
+    ntp_servers = DEVICE_CONFIG.get("ntp_servers", DEFAULT_CONFIG["ntp_servers"])
+    
+    for server in ntp_servers:
+        try:
+            print(f"[NTP] Trying to sync time with {server}...")
+            client = ntplib.NTPClient()
+            response = client.request(server, version=3, timeout=10)
+            
+            # 获取NTP时间戳
+            ntp_time = response.tx_time
+            
+            # 设置系统时间
+            import datetime
+            dt = datetime.datetime.fromtimestamp(ntp_time)
+            time_str = dt.strftime('%Y-%m-%d %H:%M:%S')
+            
+            # 使用 date 命令设置系统时间
+            subprocess.run(['date', '-s', time_str], check=True)
+            
+            print(f"[NTP] Time synchronized successfully with {server}: {time_str}")
+            return True
+            
+        except ntplib.NTPException as e:
+            print(f"[NTP] NTP error with {server}: {e}")
+            continue
+        except subprocess.CalledProcessError as e:
+            print(f"[NTP] Failed to set system time: {e}")
+            continue
+        except Exception as e:
+            print(f"[NTP] Error syncing with {server}: {e}")
+            continue
+    
+    print("[NTP] Failed to sync time with all NTP servers")
+    return False
+
+
+def _ntp_sync_thread() -> None:
+    """NTP同步后台线程，每隔指定时间同步一次"""
+    sync_interval = DEVICE_CONFIG.get("ntp_sync_interval", DEFAULT_CONFIG["ntp_sync_interval"])
+    
+    # 启动后立即同步一次
+    _sync_time_with_ntp()
+    
+    while NTP_RUNNING:
+        time.sleep(sync_interval)
+        if NTP_RUNNING:  # 再次检查，避免在等待期间被停止
+            _sync_time_with_ntp()
+
+
+def _init_ntp_thread() -> None:
+    """初始化NTP同步线程"""
+    t = threading.Thread(target=_ntp_sync_thread, daemon=True)
+    t.start()
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 
 def main() -> None:
     _init_oled_thread()
+    _init_ntp_thread()
     app.run(host="0.0.0.0", port=FLASK_PORT, threaded=True)
 
 
 if __name__ == "__main__":
     main()
+
+@app.route("/system/ntp", methods=["GET", "POST"])
+def system_ntp():
+    """NTP时间同步接口"""
+    if request.method == "GET":
+        # 返回NTP配置和最后同步时间
+        return jsonify({
+            "ntp_servers": DEVICE_CONFIG.get("ntp_servers", DEFAULT_CONFIG["ntp_servers"]),
+            "sync_interval": DEVICE_CONFIG.get("ntp_sync_interval", DEFAULT_CONFIG["ntp_sync_interval"]),
+            "current_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "running": NTP_RUNNING
+        })
+    
+    # POST - 手动同步或更新配置
+    data = request.get_json(force=True)
+    
+    if "sync_now" in data and data["sync_now"]:
+        # 手动触发同步
+        success = _sync_time_with_ntp()
+        return jsonify({
+            "status": "ok" if success else "failed",
+            "current_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "message": "Time synchronized" if success else "Failed to sync time"
+        })
+    
+    # 更新NTP配置
+    if "ntp_servers" in data:
+        DEVICE_CONFIG["ntp_servers"] = data["ntp_servers"]
+    if "sync_interval" in data:
+        DEVICE_CONFIG["sync_interval"] = max(60, int(data["sync_interval"]))  # 最少1分钟
+    
+    save_device_config(DEVICE_CONFIG)
+    return jsonify({"status": "ok", "message": "NTP configuration updated"})

@@ -4,3 +4,4 @@ pylx16a
 luma.oled
 psutil
 Pillow
+ntplib
