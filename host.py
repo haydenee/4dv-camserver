@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 import psutil  # lightweight; used for extra temperature sensors
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, redirect
 from periphery import GPIO
 from pylx16a.lx16a import LX16A, ServoTimeoutError
 from luma.core.interface.serial import i2c
@@ -369,6 +369,19 @@ def get_ip_address() -> str:
     return ip_addr
 
 
+def get_host_for_request() -> str:
+    """获取当前请求应该使用的主机名/IP"""
+    # 优先使用请求头中的Host，保持与访问方式一致
+    if request and hasattr(request, 'headers'):
+        host_header = request.headers.get('Host')
+        if host_header:
+            # 去掉端口号，只保留主机名
+            return host_header.split(':')[0]
+    
+    # 降级到IP地址
+    return get_ip_address()
+
+
 # ---------------------------------------------------------------------------
 # Flask routes
 # ---------------------------------------------------------------------------
@@ -383,11 +396,11 @@ def stream_control(protocol: str):
         
         # 如果正在运行，返回对应的URL
         if running:
-            ip = get_ip_address()
+            host = get_host_for_request()
             if protocol == "hls":
-                result["url"] = f"http://{ip}:{FLASK_PORT}/hls/stream.m3u8"
+                result["url"] = f"http://{host}:{FLASK_PORT}/hls/stream.m3u8"
             elif protocol == "rtsp":
-                result["url"] = f"rtsp://{ip}:8554/test"
+                result["url"] = f"rtsp://{host}:8554/test"
         
         return jsonify(result)
 
@@ -411,14 +424,14 @@ def stream_control(protocol: str):
 
     # If HLS and turning on, return the HLS URL
     if protocol == "hls" and on:
-        ip = get_ip_address()
-        hls_url = f"http://{ip}:{FLASK_PORT}/hls/stream.m3u8"
+        host = get_host_for_request()
+        hls_url = f"http://{host}:{FLASK_PORT}/hls/stream.m3u8"
         return jsonify({"status": "ok", "url": hls_url})
 
     # If RTSP and turning on, return the RTSP URL
     if protocol == "rtsp" and on:
-        ip = get_ip_address()
-        rtsp_url = f"rtsp://{ip}:8554/test"
+        host = get_host_for_request()
+        rtsp_url = f"rtsp://{host}:8554/test"
         return jsonify({"status": "ok", "url": rtsp_url})
 
     return jsonify({"status": "ok"})
@@ -665,6 +678,19 @@ def system_init():
 def hls_files(filename):
     """暴露 /tmp/hls/ 目录下的HLS文件"""
     return send_from_directory("/tmp/hls", filename)
+
+
+@app.route("/")
+def web_root():
+    """根路径重定向到 web 界面"""
+    return redirect("/web/")
+
+
+@app.route("/web/")
+@app.route("/web")
+def web_index():
+    """web 目录根路径自动跳转到 index.html"""
+    return send_from_directory("web", "index.html")
 
 
 @app.route("/web/<path:filename>")
