@@ -85,6 +85,8 @@ except Exception as e:  # noqa: BLE001
 OLED_LOCK = threading.Lock()
 # 舵机访问锁，防止并发访问导致数据串扰
 SERVO_LOCK = threading.Lock()
+# OLED刷新控制标志
+OLED_RUNNING = True
 
 # 配置持久化文件
 CONFIG_FILE = "device_config.json"
@@ -283,7 +285,7 @@ def _update_oled() -> None:
         return w, h
 
     toggle = False  # 用于高温反色闪烁
-    while True:
+    while OLED_RUNNING:  # 检查运行标志
         with OLED_LOCK:
             img = Image.new("1", OLED.size)
             draw = ImageDraw.Draw(img)
@@ -699,10 +701,32 @@ def web_files(filename):
     return send_from_directory("web", filename)
 
 
+def _clear_oled_display() -> None:
+    """Clear the OLED display and stop refresh thread"""
+    global OLED_RUNNING
+    if OLED is None:
+        return
+    try:
+        # 停止OLED刷新线程
+        OLED_RUNNING = False
+        time.sleep(0.1)  # 等待刷新线程退出
+        
+        # 清空显示屏
+        with OLED_LOCK:
+            from PIL import Image
+            # Create a blank image and display it to clear the screen
+            img = Image.new("1", OLED.size, 0)  # 0 = black/clear
+            OLED.display(img)
+    except Exception as e:
+        print(f"[WARN] Failed to clear OLED: {e}")
+
+
 @app.route("/power/system", methods=["POST"])
 def system_reboot():
     """系统重启接口，POST调用后立即重启系统"""
     try:
+        # 清空OLED显示屏并停止刷新
+        _clear_oled_display()
         # 立即返回响应后重启
         threading.Thread(target=lambda: (time.sleep(1), os.system('reboot')), daemon=True).start()
         return jsonify({"status": "ok", "msg": "rebooting"})
